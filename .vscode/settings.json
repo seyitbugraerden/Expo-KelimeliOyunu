@@ -1,0 +1,17 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^node --test server/bot\\.test\\.mjs$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^npm test && node --test tests/boardGeometry\\.test\\.mjs$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^npx expo lint && npx tsc --noEmit$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "npx expo": true
+    }
+}
