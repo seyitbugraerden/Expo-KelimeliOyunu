@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "expo-kelimelioyunu",
+    "name": "Kelime",
     "slug": "expo-kelimelioyunu",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -20,6 +20,9 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

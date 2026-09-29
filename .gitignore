@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# local server accounts and sessions
+server/data.json
+server/data.json.tmp
+.env
