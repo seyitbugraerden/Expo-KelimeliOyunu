@@ -16,7 +16,7 @@ test('computer connects to existing tiles and uses only its rack', async () => {
   assert.equal(g.board[112], 'K'); assert.equal(g.board[113], 'A'); assert.equal(g.turn, 'human');
 });
 test('computer passes when no word is possible, and respects end of game', async () => {
-  const g = setup(); g.racks[BOT_ID] = ['J']; g.passes = 3;
+  const g = setup(); g.racks[BOT_ID] = ['J']; g.passes = 5;
   await playBotTurn(g, validateWord); assert.equal(g.status, 'finished'); assert.equal(g.revision, 1); assert.match(g.lastMove, /Pas/);
   const before = JSON.stringify(g); await playBotTurn(g, validateWord); assert.equal(JSON.stringify(g), before);
 });

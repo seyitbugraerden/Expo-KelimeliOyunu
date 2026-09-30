@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { commitMove, createGame, PREMIUM_SQUARES, previewMove } from './game.mjs';
+import { commitMove, createGame, PREMIUM_SQUARES, previewMove, exchangeTiles, surrenderGame } from './game.mjs';
 import { BOT_ID, playBotTurn } from './bot.mjs';
 import { isTDKWord } from './tdk.mjs';
 const path = process.env.DATA_FILE || fileURLToPath(new URL('./data.json', import.meta.url));
@@ -10,7 +10,7 @@ const state = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : { user
 const save = () => { writeFileSync(`${path}.tmp`, JSON.stringify(state), { mode: 0o600 }); renameSync(`${path}.tmp`, path); };
 const publicUser = u => ({ id: u.id, name: u.name });
 function snapshot(user) {
-  return { user: publicUser(user), games: state.games.filter(g => g.players.includes(user.id)).map(g => ({ id: g.id, players: g.players.map(id => publicUser(id === BOT_ID ? { id: BOT_ID, name: 'Bilgisayar' } : state.users.find(u => u.id === id))), status: g.status, board: g.board, blankTiles: g.blankTiles || Array(225).fill(false), premiumSquares: PREMIUM_SQUARES, rack: g.racks[user.id], scores: g.scores, turn: g.turn, revision: g.revision, remaining: g.bag.length, recentMoves: g.recentMoves || [], lastMove: g.lastMove })) };
+  return { user: publicUser(user), games: state.games.filter(g => g.players.includes(user.id)).map(g => ({ id: g.id, players: g.players.map(id => publicUser(id === BOT_ID ? { id: BOT_ID, name: 'Bilgisayar' } : state.users.find(u => u.id === id))), status: g.status, board: g.board, blankTiles: g.blankTiles || Array(225).fill(false), premiumSquares: g.premiumSquares || PREMIUM_SQUARES, rack: g.racks[user.id], scores: g.scores, turn: g.turn, revision: g.revision, remaining: g.bag.length, recentMoves: g.recentMoves || [], lastMove: g.lastMove })) };
 }
 export const server = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -48,10 +48,12 @@ export const server = createServer(async (req, res) => {
       if (!target || target.id === user.id) throw Error('Geçerli bir arkadaş ID’si gir.');
       if (state.games.some(g => g.players.includes(user.id) && g.players.includes(target.id) && ['active', 'pending'].includes(g.status))) throw Error('Bu arkadaşınla zaten açık bir oyunun var.');
       state.games.push(createGame([user.id, target.id]));
-    } else if (req.method === 'POST' && ['/accept', '/decline', '/move'].includes(req.url)) {
+    } else if (req.method === 'POST' && ['/accept', '/decline', '/move', '/exchange', '/surrender'].includes(req.url)) {
       const game = state.games.find(g => g.id === body.gameId && g.players.includes(user.id));
       if (!game) throw Error('Oyun bulunamadı.');
-      if (req.url === '/move') { await commitMove(game, user.id, body, isTDKWord); await playBotTurn(game, isTDKWord); }
+      if (req.url === '/surrender') { surrenderGame(game, user.id, user.name); }
+      else if (req.url === '/move') { await commitMove(game, user.id, body, isTDKWord); await playBotTurn(game, isTDKWord); }
+      else if (req.url === '/exchange') { exchangeTiles(game, user.id, body); await playBotTurn(game, isTDKWord); }
       else {
         if (game.status !== 'pending' || game.players[1] !== user.id) throw Error('Bu davete yanıt veremezsin.');
         game.status = req.url === '/accept' ? 'active' : 'declined'; game.revision++; game.lastMove = game.status === 'active' ? 'İlk kelime merkezden geçmeli.' : 'Davet reddedildi.';

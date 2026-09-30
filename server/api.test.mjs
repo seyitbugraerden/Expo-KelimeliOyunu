@@ -59,7 +59,7 @@ test('two users invite, accept, play; private racks and authorization', async ()
     const beforePreview = JSON.stringify(cemGame);
     const preview = await req('/preview', 'fixture-token-a', { gameId: cemGame.id, revision: 0, placements: [{ index: 111, letter: 'C' }] });
     assert.equal(preview.status, 200);
-    assert.deepEqual(preview.data.preview.words, [{ cells: [111, 112, 113], word: 'CEM', points: 4, blankCells: [] }]);
+    assert.deepEqual(preview.data.preview.words, [{ cells: [111, 112, 113], word: 'CEM', points: 7, blankCells: [] }]);
     assert.equal(JSON.stringify(cemGame), beforePreview);
     const playedCem = await req('/move', 'fixture-token-a', { gameId: cemGame.id, revision: 0, placements: [{ index: 111, letter: 'C' }] });
     assert.equal(playedCem.status, 200);

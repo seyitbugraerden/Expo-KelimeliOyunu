@@ -1,7 +1,7 @@
 import { isValidWord } from './dictionary.mjs';
 import { randomInt, randomUUID } from 'node:crypto';
 export const SIZE = 15;
-export const POINTS = Object.fromEntries([... 'ABCÇDEFGĞHIİJKLMNOÖPRSŞTUÜVYZ'].map(letter => [letter, 'AEIİKLMNRT'.includes(letter) ? 1 : 'ÇĞJÖŞÜZ'.includes(letter) ? 4 : 2]));
+export const POINTS = { A:1, B:3, C:4, Ç:4, D:3, E:1, F:7, G:5, Ğ:8, H:5, I:2, İ:1, J:10, K:1, L:1, M:2, N:1, O:2, Ö:7, P:5, R:1, S:2, Ş:4, T:1, U:2, Ü:3, V:7, Y:3, Z:4, '*': 0 };
 const premiumSquares = Array(225).fill(null);
 function addSymmetricPremium(label, coordinates) {
   for (const [row, column] of coordinates) for (const [r, c] of [[row, column], [row, 14 - column], [14 - row, column], [14 - row, 14 - column]]) premiumSquares[r * SIZE + c] = label;
@@ -11,10 +11,25 @@ addSymmetricPremium('2W', [[1, 1], [2, 2], [3, 3], [4, 4], [1, 13], [2, 12], [3,
 addSymmetricPremium('3L', [[1, 5], [1, 9], [5, 1], [5, 5], [5, 9], [5, 13]]);
 addSymmetricPremium('2L', [[0, 3], [0, 11], [2, 6], [2, 8], [3, 0], [3, 7], [3, 14], [6, 2], [6, 6], [6, 8], [6, 12], [7, 3], [7, 11]]);
 export const PREMIUM_SQUARES = Object.freeze(premiumSquares);
-export function createGame(players) {
-  const bag = [...'AAAAAAAAAAAAEEEEEEEEEEEEİİİİİİİİIIIIKKKKKKLLLLLLMMMMNNNNNNRRRRRRTTTTTTUUUUOOOOBBBCCÇÇDDDFFGGĞĞHHJÖÖPPSSŞŞÜÜVVYYZZ**'];
+export function generateGamePremiumSquares() {
+  const squares = [...PREMIUM_SQUARES];
+  const candidates = [];
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const inCorner = (r < 5 || r >= 10) && (c < 5 || c >= 10);
+      const index = r * SIZE + c;
+      if (inCorner && !squares[index]) candidates.push(index);
+    }
+  }
+  const chosenIndex = candidates[randomInt(candidates.length)];
+  squares[chosenIndex] = '4W';
+  return Object.freeze(squares);
+}
+export function createGame(players, customPremiumSquares) {
+  const squares = customPremiumSquares || generateGamePremiumSquares();
+  const bag = [...'AAAAAAAAAAAABBCCÇÇÇDDDEEEEEEEEFGGĞHIIIIIİİİİİİİJKKKKKKKLLLLLLLMMMMNNNNNOOOÖPRRRRRRSSSŞŞTTTTTUUUÜÜVYYZZ**'];
   for (let i = bag.length - 1; i > 0; i--) { const j = randomInt(i + 1); [bag[i], bag[j]] = [bag[j], bag[i]]; }
-  return { id: randomUUID(), players, status: 'pending', board: Array(225).fill(null), blankTiles: Array(225).fill(false), racks: Object.fromEntries(players.map(id => [id, bag.splice(0, 7)])), scores: Object.fromEntries(players.map(id => [id, 0])), bag, turn: players[0], revision: 0, passes: 0, lastMove: 'Davetin kabul edilmesi bekleniyor.' };
+  return { id: randomUUID(), players, status: 'pending', board: Array(225).fill(null), blankTiles: Array(225).fill(false), premiumSquares: squares, racks: Object.fromEntries(players.map(id => [id, bag.splice(0, 7)])), scores: Object.fromEntries(players.map(id => [id, 0])), bag, turn: players[0], revision: 0, passes: 0, lastMove: 'Davetin kabul edilmesi bekleniyor.' };
 }
 export function move(game, userId, body, validateWord = isValidWord) {
   if (game.status !== 'active' || game.turn !== userId) throw Error('Hamle sırası sende değil.');
@@ -60,11 +75,12 @@ export function move(game, userId, body, validateWord = isValidWord) {
       const letterPoints = cells.reduce((sum, index) => {
         let value = tilePoints(index);
         if (placed.has(index)) {
-          const premium = PREMIUM_SQUARES[index];
+          const premium = (game.premiumSquares || PREMIUM_SQUARES)[index];
           if (premium === '2L') value *= 2;
           if (premium === '3L') value *= 3;
           if (premium === '2W') wordMultiplier *= 2;
           if (premium === '3W') wordMultiplier *= 3;
+          if (premium === '4W') wordMultiplier *= 4;
         }
         return sum + value;
       }, 0);
@@ -79,7 +95,28 @@ export function move(game, userId, body, validateWord = isValidWord) {
   game.recentMoves = [...(game.recentMoves || []), detail].slice(-2);
   game.revision++;
   game.turn = game.players.find(id => id !== userId);
-  if (game.passes >= 4 || game.players.some(id => game.racks[id].length === 0)) { game.status = 'finished'; game.lastMove += ' · Oyun bitti.'; }
+  if (game.passes >= 6 || game.players.some(id => game.racks[id].length === 0)) {
+    game.status = 'finished';
+    game.lastMove += ' · Oyun bitti.';
+    // Oyun sonu harf puanlaması (resmi Scrabble kuralı)
+    const rackValue = (id) => game.racks[id].reduce((sum, l) => sum + (POINTS[l] ?? 0), 0);
+    const finisher = game.players.find(id => game.racks[id].length === 0);
+    if (finisher) {
+      // Harflerini bitiren oyuncu rakibin el puanını alır
+      for (const id of game.players) {
+        if (id !== finisher) {
+          const penalty = rackValue(id);
+          game.scores[id] = Math.max(0, game.scores[id] - penalty);
+          game.scores[finisher] += penalty;
+        }
+      }
+    } else {
+      // Pas ile biten oyun: herkes kendi el puanını kaybeder
+      for (const id of game.players) {
+        game.scores[id] = Math.max(0, game.scores[id] - rackValue(id));
+      }
+    }
+  }
 }
 async function validatedMove(game, userId, body, validateWord, commit) {
   const draft = structuredClone(game);
@@ -92,3 +129,39 @@ async function validatedMove(game, userId, body, validateWord, commit) {
 }
 export function previewMove(game, userId, body, validateWord) { return validatedMove(game, userId, body, validateWord, false); }
 export function commitMove(game, userId, body, validateWord) { return validatedMove(game, userId, body, validateWord, true); }
+export function exchangeTiles(game, userId, body) {
+  if (game.status !== 'active' || game.turn !== userId) throw Error('Hamle sırası sende değil.');
+  if (body.revision !== game.revision) throw Error('Oyun güncellendi. Tekrar dene.');
+  if (game.bag.length < 7) throw Error('Torbada yeterli harf yok (değiştirmek için en az 7 harf gerekli).');
+  const indexes = body.indexes;
+  if (!Array.isArray(indexes) || indexes.length === 0 || indexes.length > 7) throw Error('Geçersiz harf seçimi.');
+  const rack = [...game.racks[userId]];
+  const sorted = [...new Set(indexes)].filter(i => Number.isInteger(i) && i >= 0 && i < rack.length).sort((a, b) => b - a);
+  if (sorted.length !== indexes.length) throw Error('Geçersiz harf indeksi.');
+  // Seçili harfleri raftan çıkar
+  const returned = sorted.map(i => rack.splice(i, 1)[0]);
+  // Yeni harfleri çek
+  while (rack.length < 7 && game.bag.length) rack.push(game.bag.pop());
+  // Eski harfleri torbaya karıştırarak iade et
+  for (const letter of returned) {
+    const pos = randomInt(game.bag.length + 1);
+    game.bag.splice(pos, 0, letter);
+  }
+  game.racks[userId] = rack;
+  game.passes = 0;
+  game.revision++;
+  game.turn = game.players.find(id => id !== userId);
+  const detail = { playerId: userId, revision: game.revision, points: 0, words: [], bonus: 0 };
+  game.recentMoves = [...(game.recentMoves || []), detail].slice(-2);
+  game.lastMove = `${returned.length} harf değiştirildi.`;
+}
+export function surrenderGame(game, userId, userName = 'Oyuncu') {
+  if (game.status !== 'active') throw Error('Yalnızca devam eden oyunlarda pes edilebilir.');
+  if (!game.players.includes(userId)) throw Error('Bu oyunda değilsin.');
+  game.status = 'finished';
+  game.revision++;
+  game.lastMove = `${userName} pes etti · Oyun bitti.`;
+  const detail = { playerId: userId, revision: game.revision, points: 0, words: [], bonus: 0 };
+  game.recentMoves = [...(game.recentMoves || []), detail].slice(-2);
+}
+

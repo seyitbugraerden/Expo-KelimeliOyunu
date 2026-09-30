@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
-import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { GestureHandlerRootView, ScrollView } from 'react-native-gesture-handler';
 import { RackTile } from './components/RackTile';
 import { GameBoard, type BoardHandle, type ScoredWord } from './components/GameBoard';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-
+import { letterPoints } from './utils/letterPoints';
 type Player = { id: string; name: string };
 type MoveDetail = { playerId: string; revision: number; points: number; words: ScoredWord[]; bonus: number };
 type Game = { recentMoves?: MoveDetail[]; id: string; players: Player[]; status: string; board: (string | null)[]; blankTiles?: boolean[]; premiumSquares?: (string | null)[]; rack: string[]; scores: Record<string, number>; turn: string; revision: number; remaining: number; lastMove: string };
@@ -16,7 +16,6 @@ type BlankTarget = { rackIndex: number; index: number | null };
 const SERVER = (process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001').replace(/\/$/, '');
 const SESSION_KEY = 'kelime-session';
 const letters = [...'ABCÇDEFGĞHIİJKLMNOÖPRSŞTUÜVYZ'];
-const points = (letter: string) => letter === '*' ? 0 : 'AEIİKLMNRT'.includes(letter) ? 1 : 'ÇĞJÖŞÜZ'.includes(letter) ? 4 : 2;
 function Button({ title, onPress, disabled = false, secondary = false }: { title: string; onPress: () => void; disabled?: boolean; secondary?: boolean }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [s.button, secondary && s.secondary, (disabled || pressed) && { opacity: 0.45 }]}><Text style={[s.buttonText, secondary && { color: '#214A41' }]}>{title}</Text></Pressable>;
 }
@@ -30,6 +29,7 @@ function GameApp() {
   const [selectedTile, setSelectedTile] = useState<number | null>(null), [placements, setPlacements] = useState<Placement[]>([]);
   const [selectedBlankLetter, setSelectedBlankLetter] = useState<string | null>(null), [blankTarget, setBlankTarget] = useState<BlankTarget | null>(null);
   const [previewResult, setPreviewResult] = useState<{ key: string; preview?: MoveDetail; error?: string } | null>(null);
+  const [exchangeMode, setExchangeMode] = useState(false), [exchangeTiles, setExchangeTiles] = useState<number[]>([]);
   const working = useRef(false), requestVersion = useRef(0);
   const game = data?.games.find(g => g.id === selectedGame);
   const draftKey = `${selectedGame}:${game?.revision}`;
@@ -40,6 +40,8 @@ function GameApp() {
     setSelectedTile(null);
     setSelectedBlankLetter(null);
     setBlankTarget(null);
+    setExchangeMode(false);
+    setExchangeTiles([]);
   }
   useEffect(() => { SecureStore.getItemAsync(SESSION_KEY).then(value => { if (value) { const saved = JSON.parse(value); if (saved.server === SERVER) setToken(saved.token); } }).catch(() => setError('Kayıtlı oturum okunamadı.')).finally(() => setReady(true)); }, []);
   async function request(path: string, body?: object, auth = token) {
@@ -75,6 +77,8 @@ function GameApp() {
       setData(next); if (path === '/computer') setSelectedGame(next.gameId);
       if (path === '/invite') setFriend('');
       if (path === '/move') { setPlacements([]); setSelectedTile(null); setSelectedBlankLetter(null); setBlankTarget(null); }
+      if (path === '/exchange') { setExchangeMode(false); setExchangeTiles([]); setSelectedTile(null); }
+      if (path === '/surrender') { setPlacements([]); setSelectedTile(null); setSelectedBlankLetter(null); setBlankTarget(null); setExchangeMode(false); setExchangeTiles([]); }
     } catch (e) { setError((e as Error).message); }
     finally { working.current = false; setBusy(false); }
   }
@@ -139,21 +143,36 @@ function GameApp() {
     }
     setSelectedTile(selectedTile === index ? null : index); setSelectedBlankLetter(null);
   }
+  function handleSurrender() {
+    if (!game || busy || game.status !== 'active') return;
+    Alert.alert(
+      'Pes Et',
+      'Bu oyundan pes etmek istediğine emin misin? Oyun sonlanacak.',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        { text: 'Pes Et', style: 'destructive', onPress: () => void act('/surrender', { gameId: game.id }) }
+      ]
+    );
+  }
   function submitMove() {
     if (!game || !movePreview?.words.length) return;
     void act('/move', { gameId: game.id, revision: game.revision, placements: placements.map(({ index, letter, blank }) => ({ index, letter, ...(blank ? { blank: true } : {}) })) });
   }
   if (game && data) return <SafeAreaView style={s.safe}><StatusBar style="dark" /><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <View style={s.gameScreen}>
-      <View style={s.gameTop}><Pressable accessibilityRole="button" onPress={() => setSelectedGame(null)} style={s.backButton}><Text style={s.backText}>‹ Oyunlar</Text></Pressable><Text style={s.gameBrand}>kelime<Text style={{ color: '#D8864C' }}>.</Text></Text><Text style={s.tag}>15 × 15</Text></View>
+      <View style={s.gameTop}><Pressable accessibilityRole="button" onPress={() => setSelectedGame(null)} style={s.backButton}><Text style={s.backText}>‹ Oyunlar</Text></Pressable><Text style={s.gameBrand}>kelime<Text style={{ color: '#D8864C' }}>.</Text></Text>{game.status === 'active' ? <Pressable accessibilityRole="button" accessibilityLabel="Oyundan pes et" disabled={busy} onPress={handleSurrender} style={s.surrenderButton}><Text style={s.surrenderText}>Pes et</Text></Pressable> : <Text style={s.tag}>15 × 15</Text>}</View>
       <View style={s.scoreRow}>{game.players.map(p => <View key={p.id} style={[s.score, s.gameScore, game.turn === p.id && game.status === 'active' && s.current]}><Text numberOfLines={1} style={s.gamePlayerName}>{p.name}{p.id === data.user.id ? ' (sen)' : ''}</Text><Text style={s.scoreNumber}>{game.scores[p.id]}</Text></View>)}</View>
       <Text style={s.gameHeading}>{game.status === 'finished' ? 'Oyun tamamlandı' : myTurn ? 'Sıra sende' : game.players.some(p => p.id === 'COMPUTER') ? 'Bilgisayarın sırası' : 'Arkadaşının sırası'}</Text>
       <View style={s.playArea}><GameBoard fitHeight scoredWords={game.recentMoves?.at(-1)?.words} previewWords={movePreview?.words} premiumSquares={game.premiumSquares} onCommit={submitMove} ref={boardRef} onDrop={dropTile} key={game.id} board={game.board} blankTiles={game.blankTiles} placements={placements} onPlace={place} enabled={!!myTurn && !busy} scrollRef={scrollRef} /></View>
       {!!previewError && <Text accessibilityRole="alert" style={s.previewError}>{previewError}</Text>}
-      <View style={s.rackHeader}><Text style={s.eyebrow}>HARFLERİN</Text><Text style={s.caption}>{placements.length ? `${placements.length} harf · ${movePreview ? `${movePreview.points} puan` : previewError ? 'Geçerli kelime yok' : 'TDK doğrulaması…'}` : 'Sürükle veya seçip kareye dokun'}</Text></View>
-      <View style={s.rack}>{game.rack.map((letter, i) => <RackTile key={i} letter={letter} points={points(letter)} selected={selectedTile === i} disabled={!myTurn || busy || placements.some(p => p.rackIndex === i)} used={placements.some(p => p.rackIndex === i)} onSelect={() => selectRackTile(i)} onDrop={(x, y) => boardRef.current?.drop(x, y, i)} />)}</View>
-      <View style={s.gameActions}><Button title={busy ? 'Gönderiliyor…' : `Hamleyi oyna${movePreview?.points ? ` · +${movePreview.points}` : ''}`} disabled={!myTurn || busy || !movePreview?.words.length} onPress={submitMove} /><Button title="Geri al" secondary disabled={busy || !placements.length} onPress={() => { setPlacements([]); setSelectedTile(null); setSelectedBlankLetter(null); }} /><Button title="Pas" secondary disabled={!myTurn || busy || !!placements.length} onPress={() => void act('/move', { gameId: game.id, revision: game.revision, placements: [] })} /></View>
-      <Text style={s.gameFooter}>Torbada {game.remaining} harf · Joker 0 puan</Text>
+      <View style={s.rackHeader}><Text style={s.eyebrow}>HARFLERİN</Text><Text style={s.caption}>{exchangeMode ? (exchangeTiles.length ? `${exchangeTiles.length} harf seçildi — değiştir veya vazgeç` : 'Değiştirmek istediğin harflere dokun') : placements.length ? `${placements.length} harf · ${movePreview ? `${movePreview.points} puan` : previewError ? 'Geçerli kelime yok' : 'TDK doğrulaması…'}` : 'Sürükle veya seçip kareye dokun'}</Text></View>
+      <View style={s.rack}>{game.rack.map((letter, i) => <RackTile key={i} letter={letter} points={letterPoints(letter)} selected={exchangeMode ? exchangeTiles.includes(i) : selectedTile === i} disabled={(!myTurn || busy) && !exchangeMode} used={!exchangeMode && placements.some(p => p.rackIndex === i)} onSelect={() => { if (exchangeMode) { setExchangeTiles(prev => prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]); } else { selectRackTile(i); } }} onDrop={(x, y) => { if (!exchangeMode) boardRef.current?.drop(x, y, i); }} />)}</View>
+      <View style={s.gameActions}>
+        {exchangeMode
+          ? <><Button title={busy ? 'Değiştiriliyor…' : `Değiştir${exchangeTiles.length ? ` (${exchangeTiles.length})` : ''}`} disabled={busy || !exchangeTiles.length} onPress={() => void act('/exchange', { gameId: game.id, revision: game.revision, indexes: exchangeTiles })} /><Button title="Vazgeç" secondary disabled={busy} onPress={() => { setExchangeMode(false); setExchangeTiles([]); }} /></>
+          : <><Button title={busy ? 'Gönderiliyor…' : `Hamleyi oyna${movePreview?.points ? ` · +${movePreview.points}` : ''}`} disabled={!myTurn || busy || !movePreview?.words.length} onPress={submitMove} /><Button title="Geri al" secondary disabled={busy || !placements.length} onPress={() => { setPlacements([]); setSelectedTile(null); setSelectedBlankLetter(null); }} /><Button title="Pas" secondary disabled={!myTurn || busy || !!placements.length} onPress={() => void act('/move', { gameId: game.id, revision: game.revision, placements: [] })} /><Button title="Değiştir" secondary disabled={!myTurn || busy || !!placements.length || game.remaining < 7} onPress={() => { setExchangeMode(true); setPlacements([]); setSelectedTile(null); }} /></>}
+      </View>
+      <Text style={s.gameFooter}>Torbada {game.remaining} harf · Joker 0 puan · 6 pas oyunu bitirir</Text>
     </View>
   </KeyboardAvoidingView><Modal transparent visible={!!blankTarget} animationType="fade" onRequestClose={() => setBlankTarget(null)}><View style={s.modalBackdrop}><View style={s.letterPicker}><Text style={s.heading}>Joker hangi harf olsun?</Text><View style={s.letterChoices}>{letters.map(letter => <Pressable key={letter} accessibilityRole="button" accessibilityLabel={`${letter} harfini seç`} onPress={() => chooseBlankLetter(letter)} style={s.letterChoice}><Text style={s.letterChoiceText}>{letter}</Text></Pressable>)}</View><Pressable accessibilityRole="button" onPress={() => setBlankTarget(null)} style={s.cancelPicker}><Text style={s.caption}>Vazgeç</Text></Pressable></View></View></Modal></SafeAreaView>;
   return <SafeAreaView style={s.safe}><StatusBar style="dark" /><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><ScrollView ref={scrollRef} contentContainerStyle={[s.page, !!game && s.gamePage]} keyboardShouldPersistTaps="handled">
@@ -172,10 +191,10 @@ function GameApp() {
         <View style={s.moveNote}><Text style={s.caption}>{game.lastMove}</Text>{game.recentMoves?.filter(move => move.words.length > 0).map(move => <Text key={move.revision} style={s.caption}>{game.players.find(p => p.id === move.playerId)?.name}: {move.words.map(word => `${word.word} +${word.points}`).join(' · ')}{move.bonus ? ` · Bonus +${move.bonus}` : ''} → +{move.points} puan</Text>)}</View>
         <GameBoard scoredWords={game.recentMoves?.at(-1)?.words} ref={boardRef} onDrop={dropTile} key={game.id} board={game.board} blankTiles={game.blankTiles} placements={placements} onPlace={place} enabled={!!myTurn && !busy} scrollRef={scrollRef} />
         <View style={s.rackHeader}><Text style={s.eyebrow}>HARFLERİN</Text><Text style={s.caption}>{placements.length ? `${placements.length} harf yerleştirildi` : 'Bir harf seç, kareye dokun'}</Text></View>
-        <View style={s.rack}>{game.rack.map((letter, i) => <RackTile key={i} letter={letter} points={points(letter)} selected={selectedTile === i} disabled={!myTurn || busy || placements.some(p => p.rackIndex === i)} used={placements.some(p => p.rackIndex === i)} onSelect={() => selectRackTile(i)} onDrop={(x, y) => boardRef.current?.drop(x, y, i)} />)}</View>
+        <View style={s.rack}>{game.rack.map((letter, i) => <RackTile key={i} letter={letter} points={letterPoints(letter)} selected={selectedTile === i} disabled={!myTurn || busy || placements.some(p => p.rackIndex === i)} used={placements.some(p => p.rackIndex === i)} onSelect={() => selectRackTile(i)} onDrop={(x, y) => boardRef.current?.drop(x, y, i)} />)}</View>
         <Text style={s.caption}>Harfi sürükle veya seçip kareye dokun. Joker için yerine geçeceği harfi seç.</Text>
         <Button title={busy ? 'Gönderiliyor…' : 'Hamleyi oyna'} disabled={!myTurn || busy || !placements.length} onPress={() => void act('/move', { gameId: game.id, revision: game.revision, placements: placements.map(({ index, letter, blank }) => ({ index, letter, ...(blank ? { blank: true } : {}) })) })} />
-        <View style={s.actions}><Button title="Geri al" secondary disabled={busy || !placements.length} onPress={() => { setPlacements([]); setSelectedTile(null); setSelectedBlankLetter(null); }} /><Button title="Pas geç" secondary disabled={!myTurn || busy || !!placements.length} onPress={() => void act('/move', { gameId: game.id, revision: game.revision, placements: [] })} /></View><Text style={s.caption}>Torbada {game.remaining} harf · Arka arkaya 4 pas oyunu bitirir.</Text>
+        <View style={s.actions}><Button title="Geri al" secondary disabled={busy || !placements.length} onPress={() => { setPlacements([]); setSelectedTile(null); setSelectedBlankLetter(null); }} /><Button title="Pas geç" secondary disabled={!myTurn || busy || !!placements.length} onPress={() => void act('/move', { gameId: game.id, revision: game.revision, placements: [] })} /></View><Text style={s.caption}>Torbada {game.remaining} harf · Arka arkaya 6 pas oyunu bitirir.</Text>
       </> : <>
         <Text style={s.hero}>İster tek başına,<Text style={{ color: '#D8864C' }}> ister arkadaşınla.</Text></Text>
         <View style={s.card}><Text style={s.heading}>Bilgisayarla oyna</Text><Text style={s.body}>Arkadaş beklemeden pratik yap. Bilgisayar Türkçe kelimeler bulur; hamle bulamazsa pas geçer.</Text><Button title={busy ? 'Hazırlanıyor…' : data.games.some(g => g.status === 'active' && g.players.some(p => p.id === 'COMPUTER')) ? 'Bilgisayarla oyuna devam et →' : 'Bilgisayarla oyna →'} disabled={busy} onPress={() => void act('/computer', {})} /></View>
@@ -185,12 +204,12 @@ function GameApp() {
         {[...data.games].reverse().filter(g => g.status !== 'declined').map(g => <View key={g.id} style={s.card}><Text style={s.heading}>{g.players.find(p => p.id !== data.user.id)?.name}</Text><Text style={s.body}>{g.status === 'pending' ? g.players[0].id === data.user.id ? 'Davetin kabul edilmesi bekleniyor' : 'Seni bir oyuna davet etti' : g.status === 'finished' ? 'Oyun bitti' : g.turn === data.user.id ? 'Sıra sende' : 'Arkadaşının sırası'}</Text>{g.status === 'pending' ? g.players[1].id === data.user.id && <View style={s.actions}><Button title="Kabul et" disabled={busy} onPress={() => void act('/accept', { gameId: g.id })} /><Button title="Reddet" secondary disabled={busy} onPress={() => void act('/decline', { gameId: g.id })} /></View> : <Button title={g.status === 'finished' ? 'Sonucu gör' : 'Tahtayı aç →'} secondary onPress={() => setSelectedGame(g.id)} />}</View>)}
       </>}
     </>}
-    <Text style={s.footnote}>TDK sözlüğü · Joker 0 puanlı · Bonus kareler etkin</Text>
+    <Text style={s.footnote}>TDK sözlüğü · Joker 0 puanlı · ★4K yıldız karesi etkin</Text>
   </ScrollView></KeyboardAvoidingView><Modal transparent visible={!!blankTarget} animationType="fade" onRequestClose={() => setBlankTarget(null)}><View style={s.modalBackdrop}><View style={s.letterPicker}><Text style={s.heading}>Joker hangi harf olsun?</Text><View style={s.letterChoices}>{letters.map(letter => <Pressable key={letter} accessibilityRole="button" accessibilityLabel={`${letter} harfini seç`} onPress={() => chooseBlankLetter(letter)} style={s.letterChoice}><Text style={s.letterChoiceText}>{letter}</Text></Pressable>)}</View><Pressable accessibilityRole="button" onPress={() => setBlankTarget(null)} style={s.cancelPicker}><Text style={s.caption}>Vazgeç</Text></Pressable></View></View></Modal></SafeAreaView>;
 }
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#F6F4EC' }, page: { padding: 18, gap: 18, maxWidth: 680, width: '100%', alignSelf: 'center', paddingBottom: 40 },
-  gameScreen: { flex: 1, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 5, gap: 4 }, gameTop: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, backButton: { minWidth: 82, minHeight: 36, justifyContent: 'center' }, backText: { color: '#315E50', fontSize: 13, fontWeight: '700' }, gameBrand: { color: '#214A41', fontSize: 23, fontWeight: '900' }, gameScore: { padding: 8, borderRadius: 10 }, gamePlayerName: { color: '#62776C', fontSize: 12, lineHeight: 16 }, gameHeading: { color: '#214A41', fontSize: 16, fontWeight: '800' }, playArea: { flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center' }, previewError: { color: '#9D4036', fontSize: 11, lineHeight: 15, textAlign: 'center' }, gameActions: { flexDirection: 'row', alignItems: 'center', gap: 6 }, gameFooter: { textAlign: 'center', color: '#74857B', fontSize: 10, lineHeight: 14 },
+  gameScreen: { flex: 1, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 5, gap: 4 }, gameTop: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, backButton: { minWidth: 82, minHeight: 36, justifyContent: 'center' }, backText: { color: '#315E50', fontSize: 13, fontWeight: '700' }, gameBrand: { color: '#214A41', fontSize: 23, fontWeight: '900' }, surrenderButton: { minWidth: 60, minHeight: 36, justifyContent: 'center', alignItems: 'flex-end', paddingHorizontal: 4 }, surrenderText: { color: '#B64F57', fontSize: 13, fontWeight: '700' }, gameScore: { padding: 8, borderRadius: 10 }, gamePlayerName: { color: '#62776C', fontSize: 12, lineHeight: 16 }, gameHeading: { color: '#214A41', fontSize: 16, fontWeight: '800' }, playArea: { flex: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center' }, previewError: { color: '#9D4036', fontSize: 11, lineHeight: 15, textAlign: 'center' }, gameActions: { flexDirection: 'row', alignItems: 'center', gap: 6 }, gameFooter: { textAlign: 'center', color: '#74857B', fontSize: 10, lineHeight: 14 },
   gamePage: { gap: 12, paddingHorizontal: 14 }, rackHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }, moveNote: { backgroundColor: '#EAF0E5', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9 },
   top: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 0 }, brand: { fontSize: 36, color: '#214A41', fontWeight: '900', letterSpacing: -2 }, tag: { fontSize: 9, letterSpacing: 1.5, color: '#62776C', fontWeight: '700' },
   eyebrow: { color: '#62776C', fontSize: 10, fontWeight: '700', letterSpacing: 1.4 }, hero: { fontSize: 35, lineHeight: 42, fontWeight: '800', letterSpacing: -1.5, color: '#214A41' }, body: { color: '#62776C', fontSize: 15, lineHeight: 23 },
