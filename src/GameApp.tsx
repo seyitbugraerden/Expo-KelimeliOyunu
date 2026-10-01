@@ -51,7 +51,7 @@ function GameApp() {
       const result = await response.json();
       if (!response.ok) { if (response.status === 401) { await SecureStore.deleteItemAsync(SESSION_KEY); setToken(null); setData(null); } throw Error(result.error); }
       return result;
-    } catch (e) { if (e instanceof Error && (e.name === 'AbortError' || e.message.includes('Network'))) throw Error('Sunucuya bağlanılamadı. Sunucunun açık ve adresinin doğru olduğunu kontrol et.'); throw e; }
+    } catch (e) { if (e instanceof Error && (e.name === 'AbortError' || e.message.includes('Network') || e.message.includes('fetch') || e.message.includes('Failed to fetch'))) throw Error('Sunucuya bağlanılamadı. Sunucunun açık (npm run server) ve adresin doğru olduğunu kontrol et.'); throw e; }
     finally { clearTimeout(timeout); }
   }
   useEffect(() => {
@@ -98,7 +98,10 @@ function GameApp() {
         if (!response.ok) throw Error(result.error);
         if (!cancelled) setPreviewResult({ key: previewKey, preview: result.preview });
       } catch (e) {
-        if (!cancelled && !(e instanceof Error && e.name === 'AbortError')) setPreviewResult({ key: previewKey, error: (e as Error).message });
+        if (!cancelled && !(e instanceof Error && e.name === 'AbortError')) {
+          const msg = (e as Error).message;
+          setPreviewResult({ key: previewKey, error: (msg.includes('fetch') || msg.includes('Network')) ? 'Sunucuya bağlanılamadı.' : msg });
+        }
       }
     }, 160);
     return () => { cancelled = true; clearTimeout(timer); controller.abort(); };

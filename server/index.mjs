@@ -14,6 +14,10 @@ function snapshot(user) {
 }
 export const server = createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
   try {
     let raw = '';
     for await (const chunk of req) { raw += chunk; if (raw.length > 8192) { res.writeHead(413); res.end(JSON.stringify({ error: 'İstek çok büyük.' })); return; } }
