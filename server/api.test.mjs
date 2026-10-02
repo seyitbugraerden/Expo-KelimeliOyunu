@@ -66,5 +66,16 @@ test('two users invite, accept, play; private racks and authorization', async ()
     assert.equal((await req('/state', 'fixture-token-b')).data.games.find(g => g.id === cemGame.id).board[111], 'C');
 
     assert.equal((await req('/move', a.token, { gameId: invited.id, revision: accepted.revision, placements: [] })).status, 400);
+
+    const surrenderRes = await req('/surrender', a.token, { gameId: accepted.id });
+    assert.equal(surrenderRes.status, 200);
+    assert.equal(surrenderRes.data.games.find(g => g.id === accepted.id).status, 'finished');
+
+    const deleteActive = await req('/delete-game', 'fixture-token-a', { gameId: fixture.id });
+    assert.equal(deleteActive.status, 400);
+
+    const deleteFinished = await req('/delete-game', a.token, { gameId: accepted.id });
+    assert.equal(deleteFinished.status, 200);
+    assert.ok(!deleteFinished.data.games.some(g => g.id === accepted.id));
   } finally { await new Promise(resolve => server.close(resolve)); await new Promise(resolve => tdkServer.close(resolve)); rmSync(dir, { recursive: true, force: true }); }
 });

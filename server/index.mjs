@@ -52,10 +52,14 @@ export const server = createServer(async (req, res) => {
       if (!target || target.id === user.id) throw Error('Geçerli bir arkadaş ID’si gir.');
       if (state.games.some(g => g.players.includes(user.id) && g.players.includes(target.id) && ['active', 'pending'].includes(g.status))) throw Error('Bu arkadaşınla zaten açık bir oyunun var.');
       state.games.push(createGame([user.id, target.id]));
-    } else if (req.method === 'POST' && ['/accept', '/decline', '/move', '/exchange', '/surrender'].includes(req.url)) {
+    } else if (req.method === 'POST' && ['/accept', '/decline', '/move', '/exchange', '/surrender', '/delete-game'].includes(req.url)) {
       const game = state.games.find(g => g.id === body.gameId && g.players.includes(user.id));
       if (!game) throw Error('Oyun bulunamadı.');
-      if (req.url === '/surrender') { surrenderGame(game, user.id, user.name); }
+      if (req.url === '/delete-game') {
+        if (!['finished', 'declined'].includes(game.status)) throw Error('Yalnızca tamamlanmış oyunlar silinebilir.');
+        state.games = state.games.filter(g => g.id !== body.gameId);
+      }
+      else if (req.url === '/surrender') { surrenderGame(game, user.id, user.name); }
       else if (req.url === '/move') { await commitMove(game, user.id, body, isTDKWord); await playBotTurn(game, isTDKWord); }
       else if (req.url === '/exchange') { exchangeTiles(game, user.id, body); await playBotTurn(game, isTDKWord); }
       else {

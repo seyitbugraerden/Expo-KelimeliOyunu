@@ -79,6 +79,7 @@ function GameApp() {
       if (path === '/move') { setPlacements([]); setSelectedTile(null); setSelectedBlankLetter(null); setBlankTarget(null); }
       if (path === '/exchange') { setExchangeMode(false); setExchangeTiles([]); setSelectedTile(null); }
       if (path === '/surrender') { setPlacements([]); setSelectedTile(null); setSelectedBlankLetter(null); setBlankTarget(null); setExchangeMode(false); setExchangeTiles([]); }
+      if (path === '/delete-game') { setSelectedGame(null); }
     } catch (e) { setError((e as Error).message); }
     finally { working.current = false; setBusy(false); }
   }
@@ -146,14 +147,26 @@ function GameApp() {
     }
     setSelectedTile(selectedTile === index ? null : index); setSelectedBlankLetter(null);
   }
-  function handleSurrender() {
-    if (!game || busy || game.status !== 'active') return;
+  function handleSurrender(gameId?: string) {
+    const targetId = typeof gameId === 'string' ? gameId : game?.id;
+    if (!targetId || busy) return;
     Alert.alert(
       'Pes Et',
-      'Bu oyundan pes etmek istediğine emin misin? Oyun sonlanacak.',
+      'Bu oyundan pes etmek istediğine emin misin? Oyun bitti durumuna geçecek.',
       [
         { text: 'Vazgeç', style: 'cancel' },
-        { text: 'Pes Et', style: 'destructive', onPress: () => void act('/surrender', { gameId: game.id }) }
+        { text: 'Pes Et', style: 'destructive', onPress: () => void act('/surrender', { gameId: targetId }) }
+      ]
+    );
+  }
+  function handleDeleteGame(gameId: string) {
+    if (busy) return;
+    Alert.alert(
+      'Oyunu Sil',
+      'Bu oyunu listeden kaldırmak istediğine emin misin?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        { text: 'Sil', style: 'destructive', onPress: () => void act('/delete-game', { gameId }) }
       ]
     );
   }
@@ -163,7 +176,7 @@ function GameApp() {
   }
   if (game && data) return <SafeAreaView style={s.safe}><StatusBar style="dark" /><KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
     <View style={s.gameScreen}>
-      <View style={s.gameTop}><Pressable accessibilityRole="button" onPress={() => setSelectedGame(null)} style={s.backButton}><Text style={s.backText}>‹ Oyunlar</Text></Pressable><Text style={s.gameBrand}>kelime<Text style={{ color: '#D8864C' }}>.</Text></Text>{game.status === 'active' ? <Pressable accessibilityRole="button" accessibilityLabel="Oyundan pes et" disabled={busy} onPress={handleSurrender} style={s.surrenderButton}><Text style={s.surrenderText}>Pes et</Text></Pressable> : <Text style={s.tag}>15 × 15</Text>}</View>
+      <View style={s.gameTop}><Pressable accessibilityRole="button" onPress={() => setSelectedGame(null)} style={s.backButton}><Text style={s.backText}>‹ Oyunlar</Text></Pressable><Text style={s.gameBrand}>kelime<Text style={{ color: '#D8864C' }}>.</Text></Text>{game.status === 'active' ? <Pressable accessibilityRole="button" accessibilityLabel="Oyundan pes et" disabled={busy} onPress={() => handleSurrender()} style={s.surrenderButton}><Text style={s.surrenderText}>Pes et</Text></Pressable> : <Text style={s.tag}>15 × 15</Text>}</View>
       <View style={s.scoreRow}>{game.players.map(p => <View key={p.id} style={[s.score, s.gameScore, game.turn === p.id && game.status === 'active' && s.current]}><Text numberOfLines={1} style={s.gamePlayerName}>{p.name}{p.id === data.user.id ? ' (sen)' : ''}</Text><Text style={s.scoreNumber}>{game.scores[p.id]}</Text></View>)}</View>
       <Text style={s.gameHeading}>{game.status === 'finished' ? 'Oyun tamamlandı' : myTurn ? 'Sıra sende' : game.players.some(p => p.id === 'COMPUTER') ? 'Bilgisayarın sırası' : 'Arkadaşının sırası'}</Text>
       <View style={s.playArea}><GameBoard fitHeight scoredWords={game.recentMoves?.at(-1)?.words} previewWords={movePreview?.words} premiumSquares={game.premiumSquares} onCommit={submitMove} ref={boardRef} onDrop={dropTile} key={game.id} board={game.board} blankTiles={game.blankTiles} placements={placements} onPlace={place} enabled={!!myTurn && !busy} scrollRef={scrollRef} /></View>
@@ -204,7 +217,7 @@ function GameApp() {
         <View style={s.card}><Text style={s.heading}>Arkadaşını davet et</Text><Text style={s.body}>Arkadaşın da profil oluştursun, ID’sini buraya yaz.</Text><TextInput accessibilityLabel="Arkadaş kullanıcı ID’si" style={s.input} value={friend} onChangeText={v => setFriend(v.toUpperCase())} autoCapitalize="characters" autoCorrect={false} maxLength={8} placeholder="Örn. A7B2C9D1" placeholderTextColor="#7C8982" /><Button title="Oyun daveti gönder →" disabled={busy || friend.length !== 8} onPress={() => void act('/invite', { userId: friend.trim() })} /></View>
         <Text style={s.heading}>Oyunların</Text>
         {!data.games.length && <Text style={s.body}>Bilgisayarla bir oyun başlat veya arkadaşını davet et.</Text>}
-        {[...data.games].reverse().filter(g => g.status !== 'declined').map(g => <View key={g.id} style={s.card}><Text style={s.heading}>{g.players.find(p => p.id !== data.user.id)?.name}</Text><Text style={s.body}>{g.status === 'pending' ? g.players[0].id === data.user.id ? 'Davetin kabul edilmesi bekleniyor' : 'Seni bir oyuna davet etti' : g.status === 'finished' ? 'Oyun bitti' : g.turn === data.user.id ? 'Sıra sende' : 'Arkadaşının sırası'}</Text>{g.status === 'pending' ? g.players[1].id === data.user.id && <View style={s.actions}><Button title="Kabul et" disabled={busy} onPress={() => void act('/accept', { gameId: g.id })} /><Button title="Reddet" secondary disabled={busy} onPress={() => void act('/decline', { gameId: g.id })} /></View> : <Button title={g.status === 'finished' ? 'Sonucu gör' : 'Tahtayı aç →'} secondary onPress={() => setSelectedGame(g.id)} />}</View>)}
+        {[...data.games].reverse().filter(g => g.status !== 'declined').map(g => <View key={g.id} style={s.card}><Text style={s.heading}>{g.players.find(p => p.id !== data.user.id)?.name}</Text><Text style={s.body}>{g.status === 'pending' ? g.players[0].id === data.user.id ? 'Davetin kabul edilmesi bekleniyor' : 'Seni bir oyuna davet etti' : g.status === 'finished' ? `Oyun bitti${g.lastMove ? ` · ${g.lastMove}` : ''}` : g.turn === data.user.id ? 'Sıra sende' : 'Arkadaşının sırası'}</Text>{g.status === 'pending' ? g.players[1].id === data.user.id && <View style={s.actions}><Button title="Kabul et" disabled={busy} onPress={() => void act('/accept', { gameId: g.id })} /><Button title="Reddet" secondary disabled={busy} onPress={() => void act('/decline', { gameId: g.id })} /></View> : g.status === 'finished' ? <View style={s.actions}><Button title="Sonucu gör" secondary onPress={() => setSelectedGame(g.id)} /><Button title="Sil" secondary disabled={busy} onPress={() => handleDeleteGame(g.id)} /></View> : <View style={s.actions}><Button title="Tahtayı aç →" secondary onPress={() => setSelectedGame(g.id)} /><Button title="Pes et" secondary disabled={busy} onPress={() => handleSurrender(g.id)} /></View>}</View>)}
       </>}
     </>}
     <Text style={s.footnote}>TDK sözlüğü · Joker 0 puanlı · ★4K yıldız karesi etkin</Text>
